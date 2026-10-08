@@ -1,4 +1,4 @@
-const SHEET_ID=PropertiesService.getScriptProperties().getProperty("SHEET_ID")||"",REQUIRE_WORKER=true,APP_ORIGIN="https://athithiyanmr.github.io";
+const SHEET_ID=PropertiesService.getScriptProperties().getProperty("SHEET_ID")||"",REQUIRE_WORKER=false,APP_ORIGIN="https://athithiyanmr.github.io";
 function ss_(){return SHEET_ID?SpreadsheetApp.openById(SHEET_ID):SpreadsheetApp.getActiveSpreadsheet()}
 function sheet_(n,h){let s=ss_().getSheetByName(n);if(!s)s=ss_().insertSheet(n);if(s.getLastRow()===0)s.appendRow(h);return s}
 function setup(){sheet_("verifications",["quarry_id","status","confidence","water","water_type","type","activity","note","worker_name","worker_email","timestamp","geometry_json"]);sheet_("workers",["email","name","active"]);return"Setup complete"}
