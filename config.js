@@ -1,0 +1,1 @@
+const CONFIG={API_URL:"",DATA_URL:"data/quarries.geojson",DISTRICTS_URL:"data/districts.geojson",APP_NAME:"Kerala Quarry Verification Tool"};
