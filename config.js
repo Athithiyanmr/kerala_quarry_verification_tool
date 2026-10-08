@@ -1,1 +1,1 @@
-const CONFIG={API_URL:"",DATA_URL:"data/quarries.geojson",DISTRICTS_URL:"data/districts.geojson",APP_NAME:"Kerala Quarry Verification Tool"};
+const CONFIG={API_URL:"https://script.google.com/macros/s/AKfycbxk5wQrVG0Z4uFQ2Cw5Kr4sgM8ioBojBBb_NHYGuCj1TDzifr2DWH6Ws5eF4dMpFM1w/exec",DATA_URL:"data/quarries.geojson",DISTRICTS_URL:"data/districts.geojson",APP_NAME:"Kerala Quarry Verification Tool"};
