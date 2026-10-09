@@ -49,28 +49,31 @@ function fillDistricts(){
   $("district").innerHTML='<option value="">All districts</option>'+names.map(x=>'<option value="'+esc(x)+'">'+esc(x)+'</option>').join("");
 }
 
+
+let searchDebounce=null,searchRequestId=0;
 function hideSearchResults(){const el=$("searchResults");if(el)el.classList.add("hidden")}
+function placeLabel(p){
+  return p.name||p.street||p.locality||p.city||p.town||p.village||p.county||p.state||"Unnamed place";
+}
+function placeSubtitle(p){
+  return [p.street,p.district,p.city||p.town||p.village||p.county,p.state,p.country].filter((v,i,a)=>v&&a.indexOf(v)===i).join(", ")||p.type||"OpenStreetMap place";
+}
 function showSearchResults(items){
   const el=$("searchResults");if(!el)return;
-  if(!items.length){el.innerHTML='<div class="searchEmpty">No matching quarries. Press Enter or choose Places to search locations.</div>';el.classList.remove("hidden");return}
+  if(!items.length){el.innerHTML='<div class="searchEmpty">No results found. Try another name or search term.</div>';el.classList.remove("hidden");return}
   el.innerHTML=items.map(item=>item.kind==="quarry"
-    ?'<button type="button" class="searchResult" role="option" data-kind="quarry" data-id="'+esc(item.id)+'"><span class="searchResultIcon">◆</span><span><b>'+esc(item.title)+'</b><small>'+esc(item.subtitle||"Known quarry")+'</small></span><em>Quarry</em></button>'
-    :'<button type="button" class="searchResult" role="option" data-kind="place" data-index="'+item.index+'"><span class="searchResultIcon">⌖</span><span><b>'+esc(item.title)+'</b><small>'+esc(item.subtitle||"OpenStreetMap location")+'</small></span><em>Place</em></button>'
+    ?'<button type="button" class="searchResult" role="option" data-kind="quarry" data-id="'+esc(item.id)+'"><span class="searchResultIcon">◆</span><span><b>'+esc(item.title)+'</b><small>'+esc(item.subtitle||"Known quarry")+'</small></span><em>Known quarry</em></button>'
+    :'<button type="button" class="searchResult" role="option" data-kind="place" data-index="'+item.index+'"><span class="searchResultIcon">'+(item.category==="category"?"⌕":"⌖")+'</span><span><b>'+esc(item.title)+'</b><small>'+esc(item.subtitle||"OpenStreetMap")+'</small></span><em>'+esc(item.badge||"Place")+'</em></button>'
   ).join("");
   el.querySelectorAll(".searchResult").forEach(btn=>btn.addEventListener("click",()=>{
     if(btn.dataset.kind==="quarry"){hideSearchResults();selectFeature(btn.dataset.id)}
-    else if(Number(btn.dataset.index)<0){searchLocation()}
     else {const result=searchLocationResults[Number(btn.dataset.index)];if(result)navigateToPlace(result)}
   }));
   el.classList.remove("hidden");
 }
-function updateSearchResults(){
-  const q=val("search").trim().toLowerCase();if(!q){hideSearchResults();return}
-  const quarryMatches=allFeatures.filter(f=>{const p=f.properties||{};return [p.quarry_id,p.osm_id,p.name,p.operator,p.mineral].join(" ").toLowerCase().includes(q)})
-    .slice(0,7).map(f=>{const p=f.properties||{};return{kind:"quarry",id:String(p.quarry_id||""),title:String(p.quarry_id||p.name||"Quarry"),subtitle:[p.name||p.mineral||"Known quarry",districtOf(p)].filter(Boolean).join(" · ")}});
-  const items=quarryMatches.slice();
-  items.push({kind:"place",index:-1,title:'Search places for "'+val("search").trim()+'"',subtitle:"Find a village, town, address or coordinates"});
-  showSearchResults(items);
+function updateLocalQuarryMatches(q){
+  return allFeatures.filter(f=>{const p=f.properties||{};return [p.quarry_id,p.osm_id,p.name,p.operator,p.mineral,districtOf(p)].join(" ").toLowerCase().includes(q.toLowerCase())})
+    .slice(0,5).map(f=>{const p=f.properties||{};return{kind:"quarry",id:String(p.quarry_id||""),title:String(p.quarry_id||p.name||"Quarry"),subtitle:[p.name||p.mineral||"Known quarry",districtOf(p)].filter(Boolean).join(" · ")}});
 }
 function parseCoordinates(query){
   const m=query.trim().match(/^\s*(-?\d+(?:\.\d+)?)\s*[,; ]\s*(-?\d+(?:\.\d+)?)\s*$/);
@@ -78,37 +81,64 @@ function parseCoordinates(query){
   const lat=Number(m[1]),lng=Number(m[2]);
   return Number.isFinite(lat)&&Number.isFinite(lng)&&Math.abs(lat)<=90&&Math.abs(lng)<=180?[lat,lng]:null;
 }
+function toPlaceResult(feature){
+  const p=feature.properties||{},coords=feature.geometry?.coordinates||[];
+  return{lat:coords[1],lon:coords[0],name:placeLabel(p),display_name:placeSubtitle(p),type:p.osm_value||p.type||"Place",properties:p};
+}
+async function searchPlaces(query,requestId){
+  const coords=parseCoordinates(query);
+  if(coords){searchLocationResults=[{lat:coords[0],lon:coords[1],name:query,display_name:"Coordinates",type:"Coordinates"}];showSearchResults([{kind:"place",index:0,title:query,subtitle:"Go to coordinates",badge:"Coordinates"}]);return}
+  const center=map?map.getCenter():{lat:10.45,lng:76.3};
+  const params=new URLSearchParams({q:query,lat:String(center.lat),lon:String(center.lng),limit:"8",lang:"en"});
+  const response=await fetch("https://photon.komoot.io/api/?"+params.toString(),{headers:{"Accept":"application/json"},cache:"no-store"});
+  if(!response.ok)throw new Error("Location search returned HTTP "+response.status);
+  const data=await response.json();
+  if(requestId!==searchRequestId)return;
+  searchLocationResults=(data.features||[]).map(toPlaceResult).filter(r=>Number.isFinite(Number(r.lat))&&Number.isFinite(Number(r.lon)));
+  const places=searchLocationResults.map((r,index)=>({kind:"place",index,title:r.name,subtitle:r.display_name,badge:r.type||"Place"}));
+  const quarries=updateLocalQuarryMatches(query);
+  showSearchResults([...quarries,...places].slice(0,10));
+}
+function updateSearchResults(){
+  const query=val("search").trim();
+  if(searchDebounce)clearTimeout(searchDebounce);
+  if(!query){searchRequestId++;hideSearchResults();return}
+  const requestId=++searchRequestId;
+  const local=updateLocalQuarryMatches(query);
+  const box=$("searchResults");
+  box.innerHTML='<div class="searchEmpty">Searching places, businesses and quarries…</div>';box.classList.remove("hidden");
+  searchDebounce=setTimeout(async()=>{
+    try{await searchPlaces(query,requestId)}
+    catch(error){
+      console.warn("OpenStreetMap autocomplete error:",error);
+      if(requestId===searchRequestId)showSearchResults(local);
+    }
+  },350);
+}
 async function searchLocation(){
   const query=val("search").trim();if(!query)return;
-  const coords=parseCoordinates(query);
-  if(coords){navigateToPlace({lat:coords[0],lon:coords[1],display_name:query,type:"Coordinates"});return}
-  const now=Date.now(),wait=Math.max(0,1100-(now-lastGeocodeAt));
-  if(wait)await new Promise(resolve=>setTimeout(resolve,wait));
-  lastGeocodeAt=Date.now();
-  $("searchPlaces").disabled=true;$("searchPlaces").textContent="Searching…";
-  const box=$("searchResults");box.innerHTML='<div class="searchEmpty">Searching OpenStreetMap…</div>';box.classList.remove("hidden");
+  if(searchDebounce)clearTimeout(searchDebounce);
+  const box=$("searchResults");
+  box.innerHTML='<div class="searchEmpty">Searching places and businesses…</div>';box.classList.remove("hidden");
+  const requestId=++searchRequestId;
   try{
-    const params=new URLSearchParams({q:query+", Kerala, India",format:"jsonv2",addressdetails:"1",limit:"5",countrycodes:"in"});
-    const response=await fetch("https://nominatim.openstreetmap.org/search?"+params.toString(),{headers:{"Accept":"application/json","Accept-Language":"en"},cache:"no-store"});
-    if(!response.ok)throw new Error("Location search returned HTTP "+response.status);
-    const results=await response.json();
-    searchLocationResults=results;
-    if(!results.length){box.innerHTML='<div class="searchEmpty">No place found. Try adding the village, town or district name.</div>';box.classList.remove("hidden");return}
-    showSearchResults(results.map((r,index)=>({kind:"place",index,title:r.name||r.display_name.split(",")[0],subtitle:r.display_name})));
+    await searchPlaces(query,requestId);
+    if(searchLocationResults.length===1)navigateToPlace(searchLocationResults[0]);
   }catch(error){
-    console.error("OpenStreetMap geocoding error:",error);
-    box.innerHTML='<div class="searchEmpty">Could not search locations. Check your connection and try again.</div>';box.classList.remove("hidden");
-  }finally{$("searchPlaces").disabled=false;$("searchPlaces").textContent="Places"}
+    console.error("OpenStreetMap search error:",error);
+    box.innerHTML='<div class="searchEmpty">Search failed. Check your connection and try again.</div>';box.classList.remove("hidden");
+  }
 }
 function navigateToPlace(result){
   const lat=Number(result.lat),lng=Number(result.lon);
   if(!Number.isFinite(lat)||!Number.isFinite(lng))return;
   hideSearchResults();suppressHighlightZoom=true;
-  map.setView([lat,lng],Math.max(map.getZoom(),14),{animate:true});
+  map.setView([lat,lng],Math.max(map.getZoom(),16),{animate:true});
   if(locationMarker)locationMarker.remove();
   locationMarker=L.marker([lat,lng]).addTo(map);
-  locationMarker.bindPopup('<b>'+esc(result.name||result.display_name||"Selected location")+'</b><br><small>Location search · OpenStreetMap</small>').openPopup();
-  $("apiState").textContent="Map moved to "+(result.name||result.display_name||"selected location");
+  const title=result.name||result.display_name||"Selected location";
+  locationMarker.bindPopup('<b>'+esc(title)+'</b><br><small>'+esc(result.display_name||"OpenStreetMap search result")+'</small>').openPopup();
+  $("apiState").textContent="Map moved to "+title;
 }
 
 function filters(){
@@ -155,7 +185,7 @@ if(panelToggle)panelToggle.onclick=()=>{const collapsed=document.body.classList.
 $("loginBtn").onclick=login;
 $("loginName").addEventListener("keydown",e=>{if(e.key==="Enter")login()});
 ["district","status","waterFilter"].forEach(id=>$(id).addEventListener("input",filters));
-$("search").addEventListener("input",()=>{filters();updateSearchResults()});
+$("search").addEventListener("input",updateSearchResults);
 $("search").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();searchLocation()}else if(e.key==="Escape")hideSearchResults()});
 $("searchPlaces").onclick=searchLocation;
 document.addEventListener("click",e=>{if(!e.target.closest("#searchWrap"))hideSearchResults()});
