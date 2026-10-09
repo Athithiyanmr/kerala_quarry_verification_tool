@@ -1,4 +1,5 @@
 let allFeatures=[],filtered=[],selected=null,selectedLayer=null,map,quarryLayer,districtLayer,drawnItems,currentWorker=null;
+let locationMarker=null,searchLocationResults=[],suppressHighlightZoom=false,lastGeocodeAt=0;
 const $=id=>document.getElementById(id),val=id=>$(id).value,esc=s=>String(s??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[m]));
 function showLogin(msg,ok=false){$("loginMsg").textContent=msg||"";$("loginMsg").className=ok?"ok":""}
 function frameRequest(action,params={}){return new Promise((resolve,reject)=>{const id="req_"+Date.now()+"_"+Math.random().toString(36).slice(2),f=$("backendFrame");const timer=setTimeout(()=>{window.removeEventListener("message",handler);reject(new Error("Apps Script request timed out"))},15000);function handler(ev){if(!ev.data||ev.data._id!==id)return;clearTimeout(timer);window.removeEventListener("message",handler);resolve(ev.data.payload)}window.addEventListener("message",handler);const u=new URL(CONFIG.API_URL);u.searchParams.set("action",action);u.searchParams.set("_id",id);Object.entries(params).forEach(([k,v])=>u.searchParams.set(k,v));f.src=u.toString()})}
@@ -47,6 +48,69 @@ function fillDistricts(){
     .map(f=>f.properties?.DISTRICT||f.properties?.district).filter(Boolean))].sort();
   $("district").innerHTML='<option value="">All districts</option>'+names.map(x=>'<option value="'+esc(x)+'">'+esc(x)+'</option>').join("");
 }
+
+function hideSearchResults(){const el=$("searchResults");if(el)el.classList.add("hidden")}
+function showSearchResults(items){
+  const el=$("searchResults");if(!el)return;
+  if(!items.length){el.innerHTML='<div class="searchEmpty">No matching quarries. Press Enter or choose Places to search locations.</div>';el.classList.remove("hidden");return}
+  el.innerHTML=items.map(item=>item.kind==="quarry"
+    ?'<button type="button" class="searchResult" role="option" data-kind="quarry" data-id="'+esc(item.id)+'"><span class="searchResultIcon">◆</span><span><b>'+esc(item.title)+'</b><small>'+esc(item.subtitle||"Known quarry")+'</small></span><em>Quarry</em></button>'
+    :'<button type="button" class="searchResult" role="option" data-kind="place" data-index="'+item.index+'"><span class="searchResultIcon">⌖</span><span><b>'+esc(item.title)+'</b><small>'+esc(item.subtitle||"OpenStreetMap location")+'</small></span><em>Place</em></button>'
+  ).join("");
+  el.querySelectorAll(".searchResult").forEach(btn=>btn.addEventListener("click",()=>{
+    if(btn.dataset.kind==="quarry"){hideSearchResults();selectFeature(btn.dataset.id)}
+    else if(Number(btn.dataset.index)<0){searchLocation()}
+    else {const result=searchLocationResults[Number(btn.dataset.index)];if(result)navigateToPlace(result)}
+  }));
+  el.classList.remove("hidden");
+}
+function updateSearchResults(){
+  const q=val("search").trim().toLowerCase();if(!q){hideSearchResults();return}
+  const quarryMatches=allFeatures.filter(f=>{const p=f.properties||{};return [p.quarry_id,p.osm_id,p.name,p.operator,p.mineral].join(" ").toLowerCase().includes(q)})
+    .slice(0,7).map(f=>{const p=f.properties||{};return{kind:"quarry",id:String(p.quarry_id||""),title:String(p.quarry_id||p.name||"Quarry"),subtitle:[p.name||p.mineral||"Known quarry",districtOf(p)].filter(Boolean).join(" · ")}});
+  const items=quarryMatches.slice();
+  items.push({kind:"place",index:-1,title:'Search places for "'+val("search").trim()+'"',subtitle:"Find a village, town, address or coordinates"});
+  showSearchResults(items);
+}
+function parseCoordinates(query){
+  const m=query.trim().match(/^\s*(-?\d+(?:\.\d+)?)\s*[,; ]\s*(-?\d+(?:\.\d+)?)\s*$/);
+  if(!m)return null;
+  const lat=Number(m[1]),lng=Number(m[2]);
+  return Number.isFinite(lat)&&Number.isFinite(lng)&&Math.abs(lat)<=90&&Math.abs(lng)<=180?[lat,lng]:null;
+}
+async function searchLocation(){
+  const query=val("search").trim();if(!query)return;
+  const coords=parseCoordinates(query);
+  if(coords){navigateToPlace({lat:coords[0],lon:coords[1],display_name:query,type:"Coordinates"});return}
+  const now=Date.now(),wait=Math.max(0,1100-(now-lastGeocodeAt));
+  if(wait)await new Promise(resolve=>setTimeout(resolve,wait));
+  lastGeocodeAt=Date.now();
+  $("searchPlaces").disabled=true;$("searchPlaces").textContent="Searching…";
+  const box=$("searchResults");box.innerHTML='<div class="searchEmpty">Searching OpenStreetMap…</div>';box.classList.remove("hidden");
+  try{
+    const params=new URLSearchParams({q:query+", Kerala, India",format:"jsonv2",addressdetails:"1",limit:"5",countrycodes:"in"});
+    const response=await fetch("https://nominatim.openstreetmap.org/search?"+params.toString(),{headers:{"Accept":"application/json","Accept-Language":"en"},cache:"no-store"});
+    if(!response.ok)throw new Error("Location search returned HTTP "+response.status);
+    const results=await response.json();
+    searchLocationResults=results;
+    if(!results.length){box.innerHTML='<div class="searchEmpty">No place found. Try adding the village, town or district name.</div>';box.classList.remove("hidden");return}
+    showSearchResults(results.map((r,index)=>({kind:"place",index,title:r.name||r.display_name.split(",")[0],subtitle:r.display_name})));
+  }catch(error){
+    console.error("OpenStreetMap geocoding error:",error);
+    box.innerHTML='<div class="searchEmpty">Could not search locations. Check your connection and try again.</div>';box.classList.remove("hidden");
+  }finally{$("searchPlaces").disabled=false;$("searchPlaces").textContent="Places"}
+}
+function navigateToPlace(result){
+  const lat=Number(result.lat),lng=Number(result.lon);
+  if(!Number.isFinite(lat)||!Number.isFinite(lng))return;
+  hideSearchResults();suppressHighlightZoom=true;
+  map.setView([lat,lng],Math.max(map.getZoom(),14),{animate:true});
+  if(locationMarker)locationMarker.remove();
+  locationMarker=L.marker([lat,lng]).addTo(map);
+  locationMarker.bindPopup('<b>'+esc(result.name||result.display_name||"Selected location")+'</b><br><small>Location search · OpenStreetMap</small>').openPopup();
+  $("apiState").textContent="Map moved to "+(result.name||result.display_name||"selected location");
+}
+
 function filters(){
   const d=val("district"),s=val("status"),w=val("waterFilter"),q=val("search").toLowerCase();
   filtered=allFeatures.filter(f=>{
@@ -74,7 +138,7 @@ return `<div class="item ${String(selected)===id?"selected":""}" onclick="select
 }).join("");
 }
 function renderMap(){if(quarryLayer)quarryLayer.remove();quarryLayer=L.geoJSON({type:"FeatureCollection",features:filtered},{style:f=>{const s=f.properties?.verification_status||"Unverified";const color=s==="Confirmed"?"#22a447":s==="Rejected"?"#dc2626":"#ffffff";return{color,weight:selected===f.properties?.quarry_id?4:2,opacity:1,fillColor:color,fillOpacity:s==="Confirmed"?.22:s==="Rejected"?.22:0}},onEachFeature:(f,l)=>{l.bindTooltip(f.properties?.quarry_id||"Quarry");l.on("click",()=>selectFeature(f.properties.quarry_id))}}).addTo(map);if(selected)highlight()}
-function selectFeature(id){const f=allFeatures.find(x=>String(x.properties?.quarry_id)===String(id));if(!f)return;selected=id;const p=f.properties||{};$("empty").classList.add("hidden");$("details").classList.remove("hidden");$("qid").textContent=p.quarry_id||"—";$("qname").textContent=p.name||p.mineral||"OSM quarry";$("rank").textContent=p.osm_rank!=null?"#"+p.osm_rank:"";$("districtVal").textContent=districtOf(p)||"—";$("areaVal").textContent=p.area_ha!=null?p.area_ha+" ha":(p.area_m2!=null?p.area_m2+" m²":"—");$("sourceVal").textContent=p.source||"OSM";$("sourceMeta").innerHTML=Object.entries(p).filter(([k])=>k!=="geometry").slice(0,18).map(([k,v])=>'<b>'+esc(k)+':</b> '+esc(v)).join(" · ");setChoice("isQuarry",p.verification_status||"Unverified");setChoice("hasWater",p.water_verified||"");$("extra").classList.toggle("hidden",!["Confirmed","Yes"].includes(p.verification_status));$("activity").value=p.activity_status||"Unknown";$("waterType").value=p.water_type||"Unknown";$("type").value=p.quarry_type_std||"Unknown";$("confidence").value=p.verification_confidence||"High";$("note").value=p.verification_note||"";highlight();renderList()}
+function selectFeature(id){const f=allFeatures.find(x=>String(x.properties?.quarry_id)===String(id));if(!f)return;suppressHighlightZoom=false;selected=id;const p=f.properties||{};$("empty").classList.add("hidden");$("details").classList.remove("hidden");$("qid").textContent=p.quarry_id||"—";$("qname").textContent=p.name||p.mineral||"OSM quarry";$("rank").textContent=p.osm_rank!=null?"#"+p.osm_rank:"";$("districtVal").textContent=districtOf(p)||"—";$("areaVal").textContent=p.area_ha!=null?p.area_ha+" ha":(p.area_m2!=null?p.area_m2+" m²":"—");$("sourceVal").textContent=p.source||"OSM";$("sourceMeta").innerHTML=Object.entries(p).filter(([k])=>k!=="geometry").slice(0,18).map(([k,v])=>'<b>'+esc(k)+':</b> '+esc(v)).join(" · ");setChoice("isQuarry",p.verification_status||"Unverified");setChoice("hasWater",p.water_verified||"");$("extra").classList.toggle("hidden",!["Confirmed","Yes"].includes(p.verification_status));$("activity").value=p.activity_status||"Unknown";$("waterType").value=p.water_type||"Unknown";$("type").value=p.quarry_type_std||"Unknown";$("confidence").value=p.verification_confidence||"High";$("note").value=p.verification_note||"";highlight();renderList()}
 function setChoice(group,v){document.querySelectorAll("#"+group+" button").forEach(b=>b.classList.toggle("selected",b.dataset.v===v))}
 function current(){return allFeatures.find(x=>String(x.properties?.quarry_id)===String(selected))}
 function collect(){const f=current();if(!f)return null;const p=f.properties||{};p.verification_status=document.querySelector("#isQuarry .selected")?.dataset.v||"Unverified";p.water_verified=document.querySelector("#hasWater .selected")?.dataset.v||"Uncertain";p.activity_status=val("activity");p.water_type=val("waterType");p.quarry_type_std=val("type");p.verification_confidence=val("confidence");p.verification_note=val("note");p.verified_by=currentWorker?.name||"";p.verified_at=new Date().toISOString();return f}
@@ -82,7 +146,7 @@ async function save(andNext=true){const f=collect();if(!f)return;const ok=await 
 function postForm(payload){return new Promise(resolve=>{const iframe=document.getElementById("apiFrame"),form=document.getElementById("apiForm"),input=document.getElementById("apiPayload");input.value=JSON.stringify(payload);form.action=CONFIG.API_URL;form.target="apiFrame";iframe.onload=()=>{setTimeout(()=>resolve(true),250)};form.submit()})}
 function move(dir){if(!filtered.length)return;let i=filtered.findIndex(f=>String(f.properties.quarry_id)===String(selected));selectFeature(filtered[(i<0?0:(i+dir+filtered.length)%filtered.length)].properties.quarry_id)}
 function stats(){let p=allFeatures.map(f=>f.properties||{});$("total").textContent=p.length;$("pending").textContent=p.filter(x=>!x.verification_status||x.verification_status==="Unverified"||x.verification_status==="pending").length;$("confirmed").textContent=p.filter(x=>x.verification_status==="Confirmed"||x.verification_status==="Yes").length;$("rejected").textContent=p.filter(x=>x.verification_status==="Rejected"||x.verification_status==="No").length;$("waterCount").textContent=p.filter(x=>x.water_verified==="Yes").length}
-function highlight(){if(!quarryLayer)return;quarryLayer.eachLayer(l=>{if(l.feature.properties.quarry_id===selected){l.setStyle({weight:5,fillOpacity:.35});l.bringToFront();map.fitBounds(l.getBounds().pad(.5))}})}
+function highlight(){if(!quarryLayer)return;quarryLayer.eachLayer(l=>{if(l.feature.properties.quarry_id===selected){l.setStyle({weight:5,fillOpacity:.35});l.bringToFront();if(!suppressHighlightZoom)map.fitBounds(l.getBounds().pad(.5))}})}
 function fitAll(){if(quarryLayer){const b=quarryLayer.getBounds();if(b.isValid())map.fitBounds(b.pad(.1))}}
 function newQuarry(layer){const id="NEW-"+Date.now();const f={type:"Feature",properties:{quarry_id:id,district:"",source:"Manual",verification_status:"Unverified",water_verified:"Uncertain",geometry_status:"New"},geometry:layer.toGeoJSON().geometry};allFeatures.push(f);drawnItems.addLayer(layer);selectFeature(id)}
 function setup(){
@@ -90,8 +154,12 @@ const panelToggle=$("togglePanel");
 if(panelToggle)panelToggle.onclick=()=>{const collapsed=document.body.classList.toggle("panel-collapsed");panelToggle.textContent=collapsed?"Show verification panel +":"Collapse panel −";panelToggle.setAttribute("aria-expanded",String(!collapsed));panelToggle.title=collapsed?"Show verification panel":"Collapse verification panel";setTimeout(()=>{if(map)map.invalidateSize({pan:false});},220)};
 $("loginBtn").onclick=login;
 $("loginName").addEventListener("keydown",e=>{if(e.key==="Enter")login()});
-["district","status","waterFilter","search"].forEach(id=>$(id).addEventListener("input",filters));
-$("reset").onclick=()=>{["district","status","waterFilter","search"].forEach(id=>$(id).value="");filters()};
+["district","status","waterFilter"].forEach(id=>$(id).addEventListener("input",filters));
+$("search").addEventListener("input",()=>{filters();updateSearchResults()});
+$("search").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();searchLocation()}else if(e.key==="Escape")hideSearchResults()});
+$("searchPlaces").onclick=searchLocation;
+document.addEventListener("click",e=>{if(!e.target.closest("#searchWrap"))hideSearchResults()});
+$("reset").onclick=()=>{["district","status","waterFilter","search"].forEach(id=>$(id).value="");if(locationMarker){locationMarker.remove();locationMarker=null}suppressHighlightZoom=false;filters();hideSearchResults()};
 document.querySelectorAll("#isQuarry button").forEach(b=>b.onclick=()=>{setChoice("isQuarry",b.dataset.v);$("extra").classList.toggle("hidden",!["Confirmed","Yes"].includes(b.dataset.v))});
 document.querySelectorAll("#hasWater button").forEach(b=>b.onclick=()=>setChoice("hasWater",b.dataset.v));
 $("save").onclick=()=>save(true);
