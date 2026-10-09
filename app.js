@@ -8,7 +8,7 @@ function logout(){currentWorker=null;localStorage.removeItem("workerName");locat
 function showError(e){console.error(e);$("mapStatus").textContent="Data loading error";$("apiState").textContent=e.message;alert("The quarry data could not be loaded. "+(e.message||e))}
 function initMap(){map=L.map("map").setView([10.45,76.3],8);const satellite=L.tileLayer("https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}",{maxZoom:21,attribution:"Imagery © Google"}).addTo(map);drawnItems=new L.FeatureGroup().addTo(map);map.addControl(new L.Control.Draw({edit:{featureGroup:drawnItems},draw:{polygon:{allowIntersection:false,showArea:true},rectangle:false,circle:false,circlemarker:false,polyline:false,marker:false}}));map.on(L.Draw.Event.CREATED,e=>newQuarry(e.layer))}
 async function getJSON(url){const r=await fetch(url,{cache:"no-store"});if(!r.ok)throw new Error(url+" returned HTTP "+r.status);const t=await r.text();if(!t.trim())throw new Error(url+" is empty");try{return JSON.parse(t)}catch(e){throw new Error(url+" is not valid JSON")}}
-async function load(){try{initMap();$("apiState").textContent="Loading quarry data…";const[q,d]=await Promise.all([getJSON(CONFIG.DATA_URL),getJSON(CONFIG.DISTRICTS_URL)]);if(!q||q.type!=="FeatureCollection")throw new Error("Quarry data is not a GeoJSON FeatureCollection");allFeatures=(q.features||[]).filter(f=>f&&f.geometry);if(!allFeatures.length)throw new Error("Quarry GeoJSON contains no features");districtLayer=L.geoJSON(d,{style:{color:"#4d6258",weight:1,fill:false}}).addTo(map);assignDistricts();fillDistricts();filters();fitAll();$("apiState").textContent=allFeatures.length+" quarries loaded";$("mapStatus").classList.add("hidden")}catch(e){showError(e)}}
+async function load(){try{initMap();$("apiState").textContent="Loading quarry data…";const[q,d]=await Promise.all([getJSON(CONFIG.DATA_URL),getJSON(CONFIG.DISTRICTS_URL)]);if(!q||q.type!=="FeatureCollection")throw new Error("Quarry data is not a GeoJSON FeatureCollection");allFeatures=(q.features||[]).filter(f=>f&&f.geometry);if(!allFeatures.length)throw new Error("Quarry GeoJSON contains no features");districtLayer=L.geoJSON(d,{style:{color:"#000000",weight:1.5,opacity:1,fill:false}}).addTo(map);assignDistricts();fillDistricts();filters();fitAll();$("apiState").textContent=allFeatures.length+" quarries loaded";$("mapStatus").classList.add("hidden")}catch(e){showError(e)}}
 async function loadBackend(){const j=await apiGet("getAll");const m=new Map((j.records||[]).map(x=>[String(x.quarry_id),x]));allFeatures.forEach(f=>{const p=f.properties||{},x=m.get(String(p.quarry_id));if(!x)return;Object.assign(p,{verification_status:x.status||p.verification_status,verification_confidence:x.confidence||p.verification_confidence,water_verified:x.water||p.water_verified,water_type:x.water_type||p.water_type,quarry_type_std:x.type||p.quarry_type_std,activity_status:x.activity||p.activity_status,verification_note:x.note||p.verification_note});if(x.geometry_json)try{f.geometry=JSON.parse(x.geometry_json)}catch(e){}})}
 function districtOf(p){return p._district_boundary||p.district||p.district_osm||""}
 function geometryCenter(geometry){
@@ -56,12 +56,12 @@ function filters(){
   if(d&&districtLayer){
     districtLayer.eachLayer(layer=>{
       const name=layer.feature?.properties?.DISTRICT||layer.feature?.properties?.district;
-      layer.setStyle({color:name===d?"#f4a340":"#4d6258",weight:name===d?3:1,fill:name===d,fillColor:"#f4a340",fillOpacity:name===d?.08:0});
+      layer.setStyle({color:name===d?"#f4a340":"#000000",weight:name===d?3:1.5,opacity:1,fill:name===d,fillColor:"#f4a340",fillOpacity:name===d?.08:0});
     });
     const selectedBoundary=districtLayer.getLayers().find(layer=>(layer.feature?.properties?.DISTRICT||layer.feature?.properties?.district)===d);
     if(selectedBoundary)map.fitBounds(selectedBoundary.getBounds().pad(.05));
   }else if(districtLayer){
-    districtLayer.setStyle({color:"#4d6258",weight:1,fill:false});
+    districtLayer.setStyle({color:"#000000",weight:1.5,opacity:1,fill:false});
   }
   renderList();renderMap();stats();
 }
