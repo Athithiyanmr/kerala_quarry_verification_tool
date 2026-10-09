@@ -10,7 +10,7 @@ function initMap(){map=L.map("map").setView([10.45,76.3],8);const satellite=L.ti
 async function getJSON(url){const r=await fetch(url,{cache:"no-store"});if(!r.ok)throw new Error(url+" returned HTTP "+r.status);const t=await r.text();if(!t.trim())throw new Error(url+" is empty");try{return JSON.parse(t)}catch(e){throw new Error(url+" is not valid JSON")}}
 async function load(){try{initMap();$("apiState").textContent="Loading quarry data…";const[q,d]=await Promise.all([getJSON(CONFIG.DATA_URL),getJSON(CONFIG.DISTRICTS_URL)]);if(!q||q.type!=="FeatureCollection")throw new Error("Quarry data is not a GeoJSON FeatureCollection");allFeatures=(q.features||[]).filter(f=>f&&f.geometry);if(!allFeatures.length)throw new Error("Quarry GeoJSON contains no features");districtLayer=L.geoJSON(d,{style:{color:"#4d6258",weight:1,fill:false}}).addTo(map);assignDistricts();fillDistricts();filters();fitAll();$("apiState").textContent=allFeatures.length+" quarries loaded";$("mapStatus").classList.add("hidden")}catch(e){showError(e)}}
 async function loadBackend(){const j=await apiGet("getAll");const m=new Map((j.records||[]).map(x=>[String(x.quarry_id),x]));allFeatures.forEach(f=>{const p=f.properties||{},x=m.get(String(p.quarry_id));if(!x)return;Object.assign(p,{verification_status:x.status||p.verification_status,verification_confidence:x.confidence||p.verification_confidence,water_verified:x.water||p.water_verified,water_type:x.water_type||p.water_type,quarry_type_std:x.type||p.quarry_type_std,activity_status:x.activity||p.activity_status,verification_note:x.note||p.verification_note});if(x.geometry_json)try{f.geometry=JSON.parse(x.geometry_json)}catch(e){}})}
-function districtOf(p){return p.district||p.district_osm||p._district_boundary||""}
+function districtOf(p){return p._district_boundary||p.district||p.district_osm||""}
 function geometryCenter(geometry){
   if(!geometry||!geometry.coordinates)return null;
   const pts=[];
@@ -37,8 +37,6 @@ function assignDistricts(){
   const boundaries=(districtLayer?districtLayer.toGeoJSON().features:[]);
   allFeatures.forEach(f=>{
     const p=f.properties||(f.properties={});
-    const existing=p.district||p.district_osm;
-    if(existing)return;
     const center=geometryCenter(f.geometry);
     const boundary=boundaries.find(b=>pointInDistrict(center,b.geometry));
     if(boundary)p._district_boundary=boundary.properties?.DISTRICT||boundary.properties?.district||"";
