@@ -117,3 +117,21 @@ body.panel-collapsed #mapLegend{left:14px}
 @media(max-width:1150px){body.panel-collapsed main{grid-template-columns:235px minmax(0,1fr)}}
 @media(max-width:900px){body.panel-collapsed main{grid-template-columns:210px minmax(0,1fr)}body.panel-collapsed #verificationPanel{display:none}}
 @media(max-width:560px){#mapLegend{left:8px;bottom:8px;min-width:145px;padding:9px 10px;gap:6px;font-size:10px}body.panel-collapsed main{display:flex;flex-direction:column}body.panel-collapsed .list{height:30vh}body.panel-collapsed #map{height:65vh}}
+
+/* Combined location + known-quarry search */
+#searchWrap{position:relative;flex:1;min-width:180px}
+.searchInputRow{display:flex;gap:6px}
+.searchInputRow input{flex:1;min-width:0;width:100%}
+.searchInputRow button{min-height:38px;padding:7px 12px;background:var(--avc-sage);border-color:#d6e2d6;color:var(--avc-forest);font-weight:650;white-space:nowrap}
+.searchInputRow button:disabled{opacity:.65;cursor:wait}
+.searchResults{position:absolute;z-index:1200;top:calc(100% + 5px);left:0;right:0;max-height:340px;overflow:auto;background:#fff;border:1px solid var(--line);border-radius:10px;box-shadow:0 12px 30px rgba(24,53,39,.18);padding:5px}
+.searchResult{display:flex;width:100%;align-items:center;gap:9px;text-align:left;border:0;border-radius:7px;background:#fff;padding:10px}
+.searchResult:hover{background:var(--avc-sage)}
+.searchResultIcon{display:flex;align-items:center;justify-content:center;flex:0 0 28px;height:28px;border-radius:8px;background:var(--avc-sage);color:var(--avc-forest);font-size:15px}
+.searchResult span:nth-child(2){display:flex;flex-direction:column;gap:2px;min-width:0;flex:1}
+.searchResult b{font-size:12px;color:var(--avc-deep);overflow-wrap:anywhere}
+.searchResult small{font-size:10px;color:var(--muted);line-height:1.4;overflow-wrap:anywhere}
+.searchResult em{font-size:9px;font-style:normal;color:var(--avc-green);background:#edf4eb;padding:3px 5px;border-radius:5px;white-space:nowrap}
+.searchEmpty{padding:12px;font-size:11px;color:var(--muted);line-height:1.5}
+@media(max-width:900px){#searchWrap{flex:1 1 100%;order:4}.searchResults{max-height:45vh}}
+@media(max-width:560px){#searchWrap{min-width:0;width:100%}.searchInputRow{width:100%}.searchInputRow button{width:auto}}
