@@ -8,11 +8,65 @@ function logout(){currentWorker=null;localStorage.removeItem("workerName");locat
 function showError(e){console.error(e);$("mapStatus").textContent="Data loading error";$("apiState").textContent=e.message;alert("The quarry data could not be loaded. "+(e.message||e))}
 function initMap(){map=L.map("map").setView([10.45,76.3],8);const satellite=L.tileLayer("https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}",{maxZoom:21,attribution:"Imagery © Google"}).addTo(map);drawnItems=new L.FeatureGroup().addTo(map);map.addControl(new L.Control.Draw({edit:{featureGroup:drawnItems},draw:{polygon:{allowIntersection:false,showArea:true},rectangle:false,circle:false,circlemarker:false,polyline:false,marker:false}}));map.on(L.Draw.Event.CREATED,e=>newQuarry(e.layer))}
 async function getJSON(url){const r=await fetch(url,{cache:"no-store"});if(!r.ok)throw new Error(url+" returned HTTP "+r.status);const t=await r.text();if(!t.trim())throw new Error(url+" is empty");try{return JSON.parse(t)}catch(e){throw new Error(url+" is not valid JSON")}}
-async function load(){try{initMap();$("apiState").textContent="Loading quarry data…";const[q,d]=await Promise.all([getJSON(CONFIG.DATA_URL),getJSON(CONFIG.DISTRICTS_URL)]);if(!q||q.type!=="FeatureCollection")throw new Error("Quarry data is not a GeoJSON FeatureCollection");allFeatures=(q.features||[]).filter(f=>f&&f.geometry);if(!allFeatures.length)throw new Error("Quarry GeoJSON contains no features");districtLayer=L.geoJSON(d,{style:{color:"#4d6258",weight:1,fill:false}}).addTo(map);fillDistricts();filters();fitAll();$("apiState").textContent=allFeatures.length+" quarries loaded";$("mapStatus").classList.add("hidden")}catch(e){showError(e)}}
+async function load(){try{initMap();$("apiState").textContent="Loading quarry data…";const[q,d]=await Promise.all([getJSON(CONFIG.DATA_URL),getJSON(CONFIG.DISTRICTS_URL)]);if(!q||q.type!=="FeatureCollection")throw new Error("Quarry data is not a GeoJSON FeatureCollection");allFeatures=(q.features||[]).filter(f=>f&&f.geometry);if(!allFeatures.length)throw new Error("Quarry GeoJSON contains no features");districtLayer=L.geoJSON(d,{style:{color:"#4d6258",weight:1,fill:false}}).addTo(map);assignDistricts();fillDistricts();filters();fitAll();$("apiState").textContent=allFeatures.length+" quarries loaded";$("mapStatus").classList.add("hidden")}catch(e){showError(e)}}
 async function loadBackend(){const j=await apiGet("getAll");const m=new Map((j.records||[]).map(x=>[String(x.quarry_id),x]));allFeatures.forEach(f=>{const p=f.properties||{},x=m.get(String(p.quarry_id));if(!x)return;Object.assign(p,{verification_status:x.status||p.verification_status,verification_confidence:x.confidence||p.verification_confidence,water_verified:x.water||p.water_verified,water_type:x.water_type||p.water_type,quarry_type_std:x.type||p.quarry_type_std,activity_status:x.activity||p.activity_status,verification_note:x.note||p.verification_note});if(x.geometry_json)try{f.geometry=JSON.parse(x.geometry_json)}catch(e){}})}
-function districtOf(p){return p.district||p.district_osm||""}
-function fillDistricts(){const n=[...new Set(allFeatures.map(f=>districtOf(f.properties||{})).filter(Boolean))].sort();$("district").innerHTML='<option value="">All districts</option>'+n.map(x=>'<option>'+esc(x)+'</option>').join("")}
-function filters(){const d=val("district"),s=val("status"),w=val("waterFilter"),q=val("search").toLowerCase();filtered=allFeatures.filter(f=>{const p=f.properties||{};return(!d||districtOf(p)===d)&&(!s||p.verification_status===s)&&(!w||p.water_verified===w)&&(!q||[p.quarry_id,p.osm_id,p.name,p.operator,p.mineral].join(" ").toLowerCase().includes(q))});renderList();renderMap();stats()}
+function districtOf(p){return p.district||p.district_osm||p._district_boundary||""}
+function geometryCenter(geometry){
+  if(!geometry||!geometry.coordinates)return null;
+  const pts=[];
+  function collect(c){if(typeof c[0]==="number"&&typeof c[1]==="number")pts.push(c);else c.forEach(collect)}
+  collect(geometry.coordinates);
+  if(!pts.length)return null;
+  return [pts.reduce((s,p)=>s+p[0],0)/pts.length,pts.reduce((s,p)=>s+p[1],0)/pts.length];
+}
+function pointInRing(point,ring){
+  const x=point[0],y=point[1];let inside=false;
+  for(let i=0,j=ring.length-1;i<ring.length;j=i++){
+    const xi=ring[i][0],yi=ring[i][1],xj=ring[j][0],yj=ring[j][1];
+    const intersects=((yi>y)!==(yj>y))&&(x<(xj-xi)*(y-yi)/(yj-yi+Number.EPSILON)+xi);
+    if(intersects)inside=!inside;
+  }
+  return inside;
+}
+function pointInDistrict(point,geometry){
+  if(!point||!geometry)return false;
+  const polygons=geometry.type==="Polygon"?[geometry.coordinates]:geometry.type==="MultiPolygon"?geometry.coordinates:[];
+  return polygons.some(poly=>poly.length&&pointInRing(point,poly[0])&&!poly.slice(1).some(ring=>pointInRing(point,ring)));
+}
+function assignDistricts(){
+  const boundaries=(districtLayer?districtLayer.toGeoJSON().features:[]);
+  allFeatures.forEach(f=>{
+    const p=f.properties||(f.properties={});
+    const existing=p.district||p.district_osm;
+    if(existing)return;
+    const center=geometryCenter(f.geometry);
+    const boundary=boundaries.find(b=>pointInDistrict(center,b.geometry));
+    if(boundary)p._district_boundary=boundary.properties?.DISTRICT||boundary.properties?.district||"";
+  });
+}
+function fillDistricts(){
+  const names=[...new Set((districtLayer?districtLayer.toGeoJSON().features:[])
+    .map(f=>f.properties?.DISTRICT||f.properties?.district).filter(Boolean))].sort();
+  $("district").innerHTML='<option value="">All districts</option>'+names.map(x=>'<option value="'+esc(x)+'">'+esc(x)+'</option>').join("");
+}
+function filters(){
+  const d=val("district"),s=val("status"),w=val("waterFilter"),q=val("search").toLowerCase();
+  filtered=allFeatures.filter(f=>{
+    const p=f.properties||{};
+    return(!d||districtOf(p)===d)&&(!s||p.verification_status===s)&&(!w||p.water_verified===w)&&(!q||[p.quarry_id,p.osm_id,p.name,p.operator,p.mineral].join(" ").toLowerCase().includes(q));
+  });
+  if(d&&districtLayer){
+    districtLayer.eachLayer(layer=>{
+      const name=layer.feature?.properties?.DISTRICT||layer.feature?.properties?.district;
+      layer.setStyle({color:name===d?"#f4a340":"#4d6258",weight:name===d?3:1,fill:name===d,fillColor:"#f4a340",fillOpacity:name===d?.08:0});
+    });
+    const selectedBoundary=districtLayer.getLayers().find(layer=>(layer.feature?.properties?.DISTRICT||layer.feature?.properties?.district)===d);
+    if(selectedBoundary)map.fitBounds(selectedBoundary.getBounds().pad(.05));
+  }else if(districtLayer){
+    districtLayer.setStyle({color:"#4d6258",weight:1,fill:false});
+  }
+  renderList();renderMap();stats();
+}
 function renderList(){
 $("count").textContent=filtered.length+" results";
 $("quarryList").innerHTML=filtered.map(f=>{
