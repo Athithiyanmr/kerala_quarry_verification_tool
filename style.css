@@ -135,3 +135,6 @@ body.panel-collapsed #mapLegend{left:14px}
 .searchEmpty{padding:12px;font-size:11px;color:var(--muted);line-height:1.5}
 @media(max-width:900px){#searchWrap{flex:1 1 100%;order:4}.searchResults{max-height:45vh}}
 @media(max-width:560px){#searchWrap{min-width:0;width:100%}.searchInputRow{width:100%}.searchInputRow button{width:auto}}
+
+/* Google Maps-style autocomplete: POIs, businesses, services and quarry matches */
+.searchInputRow button{min-width:42px;font-size:20px;line-height:1;padding:6px 10px}.searchResult em{max-width:105px;overflow:hidden;text-overflow:ellipsis}.searchEmpty{padding:13px 12px}
