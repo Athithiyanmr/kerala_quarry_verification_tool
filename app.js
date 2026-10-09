@@ -86,6 +86,8 @@ function highlight(){if(!quarryLayer)return;quarryLayer.eachLayer(l=>{if(l.featu
 function fitAll(){if(quarryLayer){const b=quarryLayer.getBounds();if(b.isValid())map.fitBounds(b.pad(.1))}}
 function newQuarry(layer){const id="NEW-"+Date.now();const f={type:"Feature",properties:{quarry_id:id,district:"",source:"Manual",verification_status:"Unverified",water_verified:"Uncertain",geometry_status:"New"},geometry:layer.toGeoJSON().geometry};allFeatures.push(f);drawnItems.addLayer(layer);selectFeature(id)}
 function setup(){
+const panelToggle=$("togglePanel");
+if(panelToggle)panelToggle.onclick=()=>{const collapsed=document.body.classList.toggle("panel-collapsed");panelToggle.textContent=collapsed?"Show verification panel +":"Collapse panel −";panelToggle.setAttribute("aria-expanded",String(!collapsed));panelToggle.title=collapsed?"Show verification panel":"Collapse verification panel";setTimeout(()=>{if(map)map.invalidateSize({pan:false});},220)};
 $("loginBtn").onclick=login;
 $("loginName").addEventListener("keydown",e=>{if(e.key==="Enter")login()});
 ["district","status","waterFilter","search"].forEach(id=>$(id).addEventListener("input",filters));
