@@ -138,3 +138,6 @@ body.panel-collapsed #mapLegend{left:14px}
 
 /* Google Maps-style autocomplete: POIs, businesses, services and quarry matches */
 .searchInputRow button{min-width:42px;font-size:20px;line-height:1;padding:6px 10px}.searchResult em{max-width:105px;overflow:hidden;text-overflow:ellipsis}.searchEmpty{padding:13px 12px}
+
+/* Shared verification status labels */
+.statusLabel{display:inline-block;margin-left:4px;padding:2px 6px;border-radius:999px;background:#eef2ed;color:#5d6d62;font-size:10px;font-weight:750;vertical-align:middle;white-space:nowrap}.statusLabel.confirmed{background:#e3f5e8;color:#18733b}.statusLabel.rejected{background:#fde8e7;color:#a92b25}.statusLabel.uncertain{background:#fff3d8;color:#865e12}
